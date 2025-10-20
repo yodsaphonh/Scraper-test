@@ -122,6 +122,7 @@ Unsuccessful responses include `success: false` and a `message` explaining the i
 - **Playwright cannot launch the browser** – Ensure `python -m playwright install` completed successfully and that the underlying browser dependencies (such as libatk, libnss3, etc.) are available on your OS.
 - **Scopus returns limited data or prompts for login** – Provide a valid `SCOPUS_COOKIE` value from an authenticated browser session.
 - **Headed mode fails inside containers/servers** – Leave `SCOPUS_HEADLESS` at its default (`true`) or set up a virtual display (e.g., Xvfb) if headed mode is required.
+- **Requests time out or return 502** – Slow networks or the first Playwright run may take longer than usual. Wait for the request to finish or rerun after installing browsers with `python -m playwright install`. The UI now keeps the request open for up to two minutes and surfaces detailed error messages from the scraper.
 
 ## Development Notes
 

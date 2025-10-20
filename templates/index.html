@@ -167,6 +167,7 @@
       const resultSection = document.getElementById('results');
       const resultTemplate = document.getElementById('result-template').innerHTML;
       const quartileTemplate = document.getElementById('quartile-item-template').innerHTML;
+      const REQUEST_TIMEOUT_MS = 120000;
 
       const setStatus = (message, variant = 'info') => {
         statusElement.textContent = message || '';
@@ -227,7 +228,7 @@
         setStatus('กำลังดึงข้อมูล กรุณารอสักครู่...');
         toggleOverlay(true);
         const abortController = new AbortController();
-        const timeoutId = setTimeout(() => abortController.abort(), 60000);
+        const timeoutId = setTimeout(() => abortController.abort(), REQUEST_TIMEOUT_MS);
         try {
           const response = await fetch(API_ENDPOINT, {
             method: 'POST',
@@ -248,7 +249,10 @@
         } catch (error) {
           console.error(error);
           if (error.name === 'AbortError') {
-            setStatus('หมดเวลารอการตอบสนองจากเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง', 'error');
+            setStatus(
+              'หมดเวลารอการตอบสนองจากเซิร์ฟเวอร์ กรุณาตรวจสอบการเชื่อมต่อหรือยืนยันว่าได้ติดตั้ง Playwright (`python -m playwright install`) แล้วลองใหม่อีกครั้ง',
+              'error'
+            );
           } else {
             setStatus('เกิดข้อผิดพลาด ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้', 'error');
           }

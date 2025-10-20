@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
 from playwright.async_api import (  # type: ignore
     TimeoutError as PlaywrightTimeoutError,
+    Error as PlaywrightError,
     async_playwright,
 )
 
@@ -84,50 +85,54 @@ async def fetch_scopus_metrics_async(
     if not sanitized_issn:
         raise ScopusScraperError("ISSN must not be empty.")
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=headless)
-        context = await browser.new_context(
-            user_agent=DEFAULT_USER_AGENT,
-            locale="en-US",
-            color_scheme="dark",
-            extra_http_headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
+    try:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=headless)
+            context = await browser.new_context(
+                user_agent=DEFAULT_USER_AGENT,
+                locale="en-US",
+                color_scheme="dark",
+                extra_http_headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
 
-        if cookie_header:
-            cookies = _parse_cookie_header(cookie_header)
-            if cookies:
-                await context.add_cookies(cookies)
-
-        page = await context.new_page()
-        try:
-            await page.goto(SOURCES_PAGE, wait_until="networkidle", timeout=timeout * 1000)
-        except PlaywrightTimeoutError as exc:  # pragma: no cover - network heavy
-            raise ScopusScraperError("Unable to load Scopus sources directory.") from exc
-
-        await _accept_consent_banner(page)
-        await _fill_issn_and_submit(page, sanitized_issn, timeout)
-
-        await page.wait_for_timeout(1500)  # allow table to update
-        row_locator = page.locator(f"tr:has-text(\"{sanitized_issn}\")")
-        if await row_locator.count() == 0:
-            raise ScopusScraperError(f"No results found for ISSN {sanitized_issn}.")
-
-        row_element = row_locator.first
-        table_data = await _extract_table_row(page, row_element)
-
-        detail_metrics: Optional[ScopusMetrics] = None
-        detail_page = await _open_detail_page_if_available(context, row_element)
-        if detail_page is not None:
             try:
-                detail_metrics = await _parse_detail_page(detail_page, sanitized_issn, timeout)
-            finally:
-                await detail_page.close()
+                if cookie_header:
+                    cookies = _parse_cookie_header(cookie_header)
+                    if cookies:
+                        await context.add_cookies(cookies)
 
-        await context.close()
-        await browser.close()
+                page = await context.new_page()
+                try:
+                    await page.goto(SOURCES_PAGE, wait_until="networkidle", timeout=timeout * 1000)
+                except PlaywrightTimeoutError as exc:  # pragma: no cover - network heavy
+                    raise ScopusScraperError("Unable to load Scopus sources directory.") from exc
+
+                await _accept_consent_banner(page)
+                await _fill_issn_and_submit(page, sanitized_issn, timeout)
+
+                await page.wait_for_timeout(1500)  # allow table to update
+                row_locator = page.locator(f"tr:has-text(\"{sanitized_issn}\")")
+                if await row_locator.count() == 0:
+                    raise ScopusScraperError(f"No results found for ISSN {sanitized_issn}.")
+
+                row_element = row_locator.first
+                table_data = await _extract_table_row(page, row_element)
+
+                detail_metrics: Optional[ScopusMetrics] = None
+                detail_page = await _open_detail_page_if_available(context, row_element)
+                if detail_page is not None:
+                    try:
+                        detail_metrics = await _parse_detail_page(detail_page, sanitized_issn, timeout)
+                    finally:
+                        await detail_page.close()
+            finally:
+                await context.close()
+                await browser.close()
+    except PlaywrightError as exc:  # pragma: no cover - environment specific
+        raise ScopusScraperError(_describe_playwright_error(exc)) from exc
 
     if detail_metrics is not None:
         # Combine table data with detail page metrics, preferring detail page info.
@@ -186,6 +191,20 @@ def fetch_scopus_metrics(
             timeout=resolved_timeout,
         )
     ).as_dict()
+
+
+def _describe_playwright_error(exc: PlaywrightError) -> str:
+    message = str(exc)
+    lowered = message.lower()
+    if "executable doesn't exist" in lowered or "playwright install" in lowered:
+        return (
+            "ไม่พบไฟล์เบราว์เซอร์ของ Playwright กรุณารันคำสั่ง `python -m playwright install` ก่อน แล้วลองใหม่อีกครั้ง"
+        )
+    if "timeout" in lowered:
+        return "เชื่อมต่อกับ Scopus ไม่สำเร็จภายในเวลาที่กำหนด กรุณาตรวจสอบเครือข่ายหรือทดลองอีกครั้ง"
+    if "browser has been closed" in lowered or "target page" in lowered:
+        return "การเชื่อมต่อกับเบราว์เซอร์ถูกยกเลิกก่อนเสร็จสิ้น กรุณาลองใหม่อีกครั้ง"
+    return f"เกิดข้อผิดพลาดจาก Playwright: {message}"
 
 
 def _parse_cookie_header(cookie_header: str) -> List[Dict[str, object]]:

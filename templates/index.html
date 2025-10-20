@@ -141,6 +141,7 @@
     </div>
 
     <script>
+      const API_ENDPOINT = "{{ url_for('scrape_metrics') }}";
       const body = document.body;
       const themeToggle = document.getElementById('theme-toggle');
       const storedTheme = localStorage.getItem('theme-preference');
@@ -200,7 +201,15 @@
       };
 
       const toggleOverlay = (show) => {
-        overlay.hidden = !show;
+        if (show) {
+          overlay.removeAttribute('hidden');
+          overlay.setAttribute('aria-hidden', 'false');
+          overlay.classList.add('is-visible');
+        } else {
+          overlay.setAttribute('hidden', '');
+          overlay.setAttribute('aria-hidden', 'true');
+          overlay.classList.remove('is-visible');
+        }
       };
 
       form.addEventListener('submit', async (event) => {
@@ -217,13 +226,16 @@
 
         setStatus('กำลังดึงข้อมูล กรุณารอสักครู่...');
         toggleOverlay(true);
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 60000);
         try {
-          const response = await fetch('{{ url_for('scrape_metrics') }}', {
+          const response = await fetch(API_ENDPOINT, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(payload),
+            signal: abortController.signal,
           });
           const result = await response.json();
           if (!response.ok || !result.success) {
@@ -235,8 +247,13 @@
           setStatus('ดึงข้อมูลสำเร็จ', 'success');
         } catch (error) {
           console.error(error);
-          setStatus('เกิดข้อผิดพลาด ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้', 'error');
+          if (error.name === 'AbortError') {
+            setStatus('หมดเวลารอการตอบสนองจากเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง', 'error');
+          } else {
+            setStatus('เกิดข้อผิดพลาด ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้', 'error');
+          }
         } finally {
+          clearTimeout(timeoutId);
           toggleOverlay(false);
         }
       });

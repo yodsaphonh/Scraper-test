@@ -456,6 +456,11 @@ body.theme-light .quartile-item {
   text-align: center;
 }
 
+.overlay[hidden] {
+  display: none !important;
+  opacity: 0;
+}
+
 body.theme-light .overlay {
   background: rgba(15, 23, 42, 0.3);
   color: #0f172a;

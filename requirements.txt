@@ -1,0 +1,4 @@
+Flask>=2.3
+playwright>=1.44
+python-dotenv>=1.0
+beautifulsoup4>=4.12

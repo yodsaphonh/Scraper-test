@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="th" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scopus Metrics Scraper</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=Inter:wght@400;600;700&display=swap" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="theme-dark">
+    <div class="background-glow"></div>
+    <main class="layout">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Web Scraper</p>
+          <h1>Scopus Journal Insight</h1>
+          <p class="lead">
+            กรอกหมายเลข ISSN เพื่อดึงข้อมูล CiteScore, SJR และ SNIP จาก Scopus พร้อมแสดง Quartile
+            (Q1-Q4) ในแต่ละสาขาแบบอัตโนมัติ
+          </p>
+        </div>
+        <button id="theme-toggle" type="button" aria-label="เปลี่ยนธีม" class="theme-toggle">
+          <span class="toggle-icon" aria-hidden="true">🌙</span>
+          <span class="toggle-label">โหมดมืด</span>
+        </button>
+      </header>
+
+      <section class="card">
+        <form id="scrape-form" class="scrape-form">
+          <div class="field-group">
+            <label for="issn-input">ISSN</label>
+            <div class="input-wrapper">
+              <span class="input-prefix">ISSN</span>
+              <input
+                type="text"
+                id="issn-input"
+                name="issn"
+                placeholder="เช่น 1234-5678"
+                autocomplete="off"
+                required
+              />
+            </div>
+            <p class="field-hint">รองรับรูปแบบมีขีด (-) หรือไม่มีขีด</p>
+          </div>
+
+          <details class="advanced">
+            <summary>การตั้งค่าขั้นสูง</summary>
+            <div class="advanced-grid">
+              <label for="cookie-input">Cookie สำหรับ Scopus (ถ้ามี)</label>
+              <textarea
+                id="cookie-input"
+                name="cookie"
+                rows="2"
+                placeholder="ใส่ค่า Cookie Header สำหรับบัญชี Scopus หากจำเป็น"
+              >{{ default_cookie }}</textarea>
+              <p class="field-hint">
+                บางพื้นที่จำเป็นต้องล็อกอิน Scopus ก่อนจึงจะเข้าถึงข้อมูลได้ สามารถนำค่า Cookie จากเบราว์เซอร์มาใส่ที่นี่
+              </p>
+              <label class="switch">
+                <input type="checkbox" id="headless-toggle" name="headless" {% if headless %}checked{% endif %} />
+                <span>รันเบราว์เซอร์แบบหัวจอ (Headless)</span>
+              </label>
+            </div>
+          </details>
+
+          <button type="submit" class="submit-button">
+            <span>เริ่มดึงข้อมูล</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M5 12h14M13 5l7 7-7 7"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              ></path>
+            </svg>
+          </button>
+        </form>
+        <div id="form-status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="results" id="results">
+        <div class="placeholder">
+          <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+            <path
+              d="M10 50h44M10 36h44M10 22h44M16 8h32"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+              opacity="0.4"
+            ></path>
+          </svg>
+          <p>ผลลัพธ์จะแสดงที่นี่หลังจากดึงข้อมูลเรียบร้อย</p>
+        </div>
+      </section>
+    </main>
+
+    <template id="result-template">
+      <article class="result-card">
+        <header class="result-header">
+          <div>
+            <p class="result-issn">ISSN {{ISSN}}</p>
+            <h2>{{TITLE}}</h2>
+          </div>
+          <a class="result-link" href="{{URL}}" target="_blank" rel="noopener">เปิดใน Scopus</a>
+        </header>
+        <div class="metric-grid">
+          <div class="metric">
+            <p class="metric-label">CiteScore</p>
+            <p class="metric-value">{{CITESCORE}}</p>
+          </div>
+          <div class="metric">
+            <p class="metric-label">SJR</p>
+            <p class="metric-value">{{SJR}}</p>
+          </div>
+          <div class="metric">
+            <p class="metric-label">SNIP</p>
+            <p class="metric-value">{{SNIP}}</p>
+          </div>
+        </div>
+        <section class="quartile-section">
+          <h3>Quartile ตามสาขา</h3>
+          <ul class="quartile-list">{{QUARTILES}}</ul>
+        </section>
+      </article>
+    </template>
+
+    <template id="quartile-item-template">
+      <li class="quartile-item">
+        <span class="badge">{{Q}}</span>
+        <span class="subject">{{SUBJECT}}</span>
+      </li>
+    </template>
+
+    <div id="overlay-loader" class="overlay" hidden>
+      <div class="spinner"></div>
+      <p>กำลังดึงข้อมูล...</p>
+    </div>
+
+    <script>
+      const body = document.body;
+      const themeToggle = document.getElementById('theme-toggle');
+      const storedTheme = localStorage.getItem('theme-preference');
+      const defaultTheme = body.classList.contains('theme-light') ? 'light' : 'dark';
+      const applyTheme = (theme) => {
+        body.classList.remove('theme-dark', 'theme-light');
+        body.classList.add(`theme-${theme}`);
+        localStorage.setItem('theme-preference', theme);
+        themeToggle.querySelector('.toggle-icon').textContent = theme === 'dark' ? '🌙' : '☀️';
+        themeToggle.querySelector('.toggle-label').textContent = theme === 'dark' ? 'โหมดมืด' : 'โหมดสว่าง';
+      };
+
+      applyTheme(storedTheme || defaultTheme);
+
+      themeToggle.addEventListener('click', () => {
+        const nextTheme = body.classList.contains('theme-dark') ? 'light' : 'dark';
+        applyTheme(nextTheme);
+      });
+
+      const form = document.getElementById('scrape-form');
+      const overlay = document.getElementById('overlay-loader');
+      const statusElement = document.getElementById('form-status');
+      const resultSection = document.getElementById('results');
+      const resultTemplate = document.getElementById('result-template').innerHTML;
+      const quartileTemplate = document.getElementById('quartile-item-template').innerHTML;
+
+      const setStatus = (message, variant = 'info') => {
+        statusElement.textContent = message || '';
+        statusElement.dataset.variant = message ? variant : '';
+      };
+
+      const renderQuartiles = (quartiles) => {
+        if (!Array.isArray(quartiles) || quartiles.length === 0) {
+          return '<li class="quartile-item empty">ไม่มีข้อมูล Quartile</li>';
+        }
+        return quartiles
+          .map((item) => {
+            const subject = (item.subject || item.Subject || '').trim() || 'ไม่ระบุสาขา';
+            const quartile = (item.quartile || item.Quartile || '').trim() || '-';
+            return quartileTemplate
+              .replace('{{SUBJECT}}', subject)
+              .replace('{{Q}}', quartile);
+          })
+          .join('');
+      };
+
+      const renderResult = (data) => {
+        const html = resultTemplate
+          .replace('{{ISSN}}', data.issn || '-')
+          .replace('{{TITLE}}', data.title || 'ไม่พบชื่อวารสาร')
+          .replace('{{URL}}', data.sourceUrl || '#')
+          .replace('{{CITESCORE}}', data.citeScore || '-')
+          .replace('{{SJR}}', data.sjr || '-')
+          .replace('{{SNIP}}', data.snip || '-')
+          .replace('{{QUARTILES}}', renderQuartiles(data.quartiles));
+        resultSection.innerHTML = html;
+      };
+
+      const toggleOverlay = (show) => {
+        overlay.hidden = !show;
+      };
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const issnInput = document.getElementById('issn-input');
+        const cookieInput = document.getElementById('cookie-input');
+        const headlessToggle = document.getElementById('headless-toggle');
+
+        const payload = {
+          issn: issnInput.value,
+          cookie: cookieInput.value,
+          headless: headlessToggle.checked,
+        };
+
+        setStatus('กำลังดึงข้อมูล กรุณารอสักครู่...');
+        toggleOverlay(true);
+        try {
+          const response = await fetch('{{ url_for('scrape_metrics') }}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            const errorMessage = result.message || 'ไม่สามารถดึงข้อมูลได้';
+            setStatus(errorMessage, 'error');
+            return;
+          }
+          renderResult(result.data || {});
+          setStatus('ดึงข้อมูลสำเร็จ', 'success');
+        } catch (error) {
+          console.error(error);
+          setStatus('เกิดข้อผิดพลาด ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้', 'error');
+        } finally {
+          toggleOverlay(false);
+        }
+      });
+    </script>
+  </body>
+</html>
